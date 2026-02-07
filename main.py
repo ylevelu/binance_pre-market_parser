@@ -1,61 +1,59 @@
 import time
 import json
-from services.binance_futures import get_usdt_futures, get_futures_ticker
-from services.binance_spot import get_spot_tokens
-from services.coingecko import get_market_cap
-from tg.notifier import send
 from config import CHECK_INTERVAL
+from services.binance_spot import get_spot_symbols
+from services.binance_futures import get_premarket_usdtm_symbols
+from tg.notifier import send
 
-send("Бот запущен ✔️")
+SEEN_FILE = "storage/seen.json"
 
-with open("storage/seen.json") as f:
-    seen = set(json.load(f)["tokens"])
 
-while True:
+def load_seen():
     try:
-        futures = get_usdt_futures()
-        tickers = get_futures_ticker()
-        spot_tokens = get_spot_tokens()
+        with open(SEEN_FILE, "r") as f:
+            return set(json.load(f))
+    except Exception:
+        return set()
 
-        for f in futures:
-            symbol = f["symbol"]
-            base = f["baseAsset"]
 
-            # ❌ если уже есть спот — пропускаем
-            if base in spot_tokens:
-                continue
+def save_seen(seen):
+    with open(SEEN_FILE, "w") as f:
+        json.dump(list(seen), f)
 
-            # ❌ если уже отправляли
-            if symbol in seen:
-                continue
 
-            t = tickers.get(symbol)
-            if not t:
-                continue
+def main():
+    send("*Bot started ✔️*")
 
-            price = t["lastPrice"]
-            volume = t["quoteVolume"]
-            cap = get_market_cap(symbol)
+    seen = load_seen()
 
-            message = (
-                "*BINANCE FUTURES PRE-MARKET*\n\n"
-                f"Token: `{base}`\n"
-                f"Ticker: `{symbol}`\n"
-                f"Price: `{price}`\n"
-                f"24h Volume: `${volume}`\n"
-                f"Market Cap: `{cap}`\n\n"
-                "Spot listing: *NOT YET*\n"
-                "TGE / Tokenomics pending"
-            )
+    while True:
+        try:
+            spot = get_spot_symbols()
+            premarket = get_premarket_usdtm_symbols(spot)
 
-            send(message)
+            for token in premarket:
+                symbol = token["symbol"]
+                if symbol in seen:
+                    continue
 
-            seen.add(symbol)
-            with open("storage/seen.json", "w") as f:
-                json.dump({"tokens": list(seen)}, f)
+                msg = (
+                    f"*New Binance USDT-M Pre-Market*\n\n"
+                    f"• Symbol: `{symbol}`\n"
+                    f"• Price: `{token['price']}` USDT\n"
+                    f"• 24h Volume: `{token['volume']:.2f}` USDT\n\n"
+                    f"_Fresh futures contract, spot not listed yet_"
+                )
+
+                send(msg)
+                seen.add(symbol)
+
+            save_seen(seen)
+
+        except Exception as e:
+            print("MAIN LOOP ERROR:", e)
 
         time.sleep(CHECK_INTERVAL)
 
-    except Exception as e:
-        print("ERROR:", e)
-        time.sleep(10)
+
+if __name__ == "__main__":
+    main()
